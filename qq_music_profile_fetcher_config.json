@@ -1,0 +1,47 @@
+{
+  "cookies": {
+    "multiline": "",
+    "items": [
+      "uin=o000000001; qm_keyst=your_cookie_1;",
+      "uin=o000000002; qm_keyst=your_cookie_2;"
+    ]
+  },
+  "qq_numbers": [],
+  "qq_generator": {
+    "enabled": true,
+    "prefix": "12",
+    "suffix": "88",
+    "pad_width": 4,
+    "start": 1,
+    "end": 20,
+    "step": 1
+  },
+  "request": {
+    "retries": 2,
+    "max_count": 0
+  },
+  "sleep": {
+    "seconds": 1.5,
+    "jitter_seconds": 0.5
+  },
+  "filters": [
+    {
+      "field": "ip_location",
+      "contains": "江苏"
+    }
+  ],
+  "output": {
+    "file": "qq_music_profile_results.json",
+    "fields": [
+      "qq_number",
+      "name",
+      "ip_location",
+      "fans_num",
+      "visitor_num",
+      "gender",
+      "used_cookie",
+      "request_attempt"
+    ],
+    "include_raw_profile_data": false
+  }
+}
