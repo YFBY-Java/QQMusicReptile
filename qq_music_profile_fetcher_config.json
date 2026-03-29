@@ -10,13 +10,13 @@
   "qq_numbers_说明": "直接指定要抓取的 QQ 号列表。会和 qq_generator 生成结果合并并自动去重。",
   "qq_numbers": [10086],
   "qq_generator": {
-    "说明": "批量生成 QQ 号配置。生成规则：prefix + 中间数字按 pad_width 补零 + suffix。",
+    "说明": "批量生成 QQ 号配置。生成规则：prefix + 中间枚举位 + suffix。fill_width=3 时，中间位会按 000、001、002 ... 999 这种方式生成。start/end/step 表示这个中间枚举值的范围和步长。",
     "enabled": false,
     "prefix": "12",
     "suffix": "88",
-    "pad_width": 4,
-    "start": 1,
-    "end": 20,
+    "fill_width": 3,
+    "start": 0,
+    "end": 999,
     "step": 1
   },
   "request": {
@@ -32,9 +32,9 @@
   "filters_说明": "字段筛选配置。每个字段都是独立开关；enabled=true 时才参与筛选。支持 equals、contains、not_contains、regex、in。",
   "filters": {
     "ip_location": {
-      "说明": "IP 属地筛选。示例：contains=广东，表示只保留属地中包含“广东”的结果。",
-      "enabled": true,
-      "contains": ""
+      "说明": "IP 属地筛选。示例：contains=广东，表示只保留属地中包含“XX”的结果。",
+      "enabled": false,
+      "contains": "123"
     },
     "gender": {
       "说明": "性别筛选。示例：equals=男，表示只保留性别为男的结果。",
@@ -53,9 +53,10 @@
     }
   },
   "output": {
-    "说明": "输出配置。directory 为输出目录，不存在会自动创建；file 为输出文件名；fields 控制最终输出哪些字段；include_raw_profile_data 控制是否保留原始资料。",
+    "说明": "输出配置。directory 为输出目录，不存在会自动创建；file 为基础文件名；如果启用了筛选，实际输出文件名会自动追加当前筛选项组合；encoding 为结果文件编码，默认 utf-8；fields 控制最终输出哪些字段；include_raw_profile_data 控制是否保留原始资料。",
     "directory": "output",
-    "file": "qq_music_profile_results.json",
+    "file": "qq_music_results.json",
+    "encoding": "utf-8",
     "fields": [
       "qq_number",
       "name",
@@ -63,6 +64,9 @@
       "fans_num",
       "visitor_num",
       "gender",
+      "playlist_hostname",
+      "playlist_total",
+      "playlists",
       "used_cookie",
       "request_attempt"
     ],

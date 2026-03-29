@@ -54,7 +54,14 @@ class QQMusicProfileClient:
             ),
         }
 
-    def get_encrypt_uin(self, qq_number: str) -> str:
+    @staticmethod
+    def parse_json_response(resp: requests.Response) -> Dict[str, Any]:
+        try:
+            return json.loads(resp.content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return resp.json()
+
+    def get_created_diss_data(self, qq_number: str) -> Dict[str, Any]:
         url = "https://c6.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss"
         params = {
             "r": "",
@@ -78,14 +85,15 @@ class QQMusicProfileClient:
         resp = self.session.get(url, headers=self.api_headers, params=params, timeout=15)
         resp.raise_for_status()
 
-        data = resp.json()
+        data = self.parse_json_response(resp)
         if data.get("code") != 0:
-            raise RuntimeError(f"获取 encrypt_uin 失败：{data}")
+            raise RuntimeError(f"获取用户歌单信息失败：{data}")
 
-        encrypt_uin = data.get("data", {}).get("encrypt_uin")
+        created_diss_data = data.get("data", {})
+        encrypt_uin = created_diss_data.get("encrypt_uin")
         if not encrypt_uin:
             raise RuntimeError(f"没有拿到 encrypt_uin，响应内容：{data}")
-        return encrypt_uin
+        return created_diss_data
 
     def get_profile_html(self, encrypt_uin: str, cookie: str) -> str:
         url = "https://i2.y.qq.com/n3/other/pages/share/profile_v2/index.html"
@@ -115,12 +123,14 @@ class QQMusicProfileClient:
         return json.loads(json_str)
 
     def get_profile_info(self, qq_number: str, cookie: str) -> Dict[str, Any]:
-        encrypt_uin = self.get_encrypt_uin(qq_number)
+        created_diss_data = self.get_created_diss_data(qq_number)
+        encrypt_uin = created_diss_data.get("encrypt_uin")
         html_text = self.get_profile_html(encrypt_uin, cookie)
         ssr_data = self.extract_ssr_data(html_text)
 
         info_root = ssr_data.get("homeData", {}).get("data", {}).get("Info", {})
         base_info = info_root.get("BaseInfo", {})
+        playlists = created_diss_data.get("disslist", [])
 
         return {
             "qq_number": qq_number,
@@ -135,6 +145,9 @@ class QQMusicProfileClient:
             "ip_location": info_root.get("IP", {}).get("Location"),
             "constellation": info_root.get("Constellation", {}).get("Constellation"),
             "gender": info_root.get("Gender", {}).get("Gender"),
+            "playlist_hostname": created_diss_data.get("hostname"),
+            "playlist_total": created_diss_data.get("totoal", len(playlists)),
+            "playlists": playlists,
             "raw_profile_data": ssr_data,
         }
 
@@ -153,18 +166,23 @@ def build_qq_numbers(config: Dict[str, Any]) -> List[str]:
 
     prefix = str(generator.get("prefix", ""))
     suffix = str(generator.get("suffix", ""))
-    pad_width = int(generator.get("pad_width", 0))
+    fill_width = int(generator.get("fill_width", generator.get("pad_width", 0)))
+    max_value = (10 ** fill_width) - 1 if fill_width > 0 else 0
     start = int(generator.get("start", 0))
-    end = int(generator.get("end", -1))
+    end = int(generator.get("end", max_value))
     step = int(generator.get("step", 1))
 
+    if fill_width < 0:
+        raise ValueError("qq_generator.fill_width 不能小于 0")
     if step <= 0:
         raise ValueError("qq_generator.step 必须大于 0")
     if end < start:
         raise ValueError("qq_generator.end 不能小于 start")
+    if end > max_value:
+        raise ValueError("qq_generator.end 不能大于当前 fill_width 可表示的最大值")
 
     generated = [
-        f"{prefix}{str(number).zfill(pad_width)}{suffix}"
+        f"{prefix}{str(number).zfill(fill_width)}{suffix}"
         for number in range(start, end + 1, step)
     ]
     return deduplicate(explicit_numbers + generated)
@@ -208,6 +226,48 @@ def normalize_filters(filters_config: Any) -> List[Dict[str, Any]]:
         merged_item.setdefault("field", field)
         normalized.append(merged_item)
     return normalized
+
+
+def slugify_filename_part(value: Any) -> str:
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return "empty"
+
+    text = re.sub(r"[\\/:*?\"<>|]+", "_", text)
+    text = re.sub(r"\s+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("._ ")
+    return text[:80] or "empty"
+
+
+def build_filter_filename(filters: List[Dict[str, Any]], fallback_name: str) -> str:
+    if not filters:
+        return fallback_name
+
+    suffix_parts: List[str] = []
+    supported_operators = ("equals", "contains", "not_contains", "regex", "in")
+
+    for filter_item in filters:
+        field = slugify_filename_part(filter_item.get("field", "unknown"))
+        operator = ""
+        raw_value: Any = None
+
+        for candidate in supported_operators:
+            if candidate in filter_item and filter_item.get(candidate) is not None:
+                operator = candidate
+                raw_value = filter_item.get(candidate)
+                break
+
+        if isinstance(raw_value, list):
+            value = "+".join(slugify_filename_part(item) for item in raw_value)
+        else:
+            value = slugify_filename_part(raw_value)
+
+        operator = operator or "custom"
+        suffix_parts.append(f"{field}-{operator}-{value}")
+
+    base_name = Path(fallback_name).stem
+    suffix = Path(fallback_name).suffix or ".json"
+    return f"{base_name}__{'__'.join(suffix_parts)}{suffix}"
 
 
 def is_match_filter(profile: Dict[str, Any], filters: List[Dict[str, Any]]) -> bool:
@@ -335,6 +395,8 @@ def save_output(config: Dict[str, Any], data: Dict[str, Any]) -> None:
     output_config = config.get("output", {})
     output_dir = Path(output_config.get("directory", "output"))
     output_file = str(output_config.get("file", "qq_music_profile_results.json")).strip() or "qq_music_profile_results.json"
+    output_encoding = str(output_config.get("encoding", "utf-8")).strip() or "utf-8"
+    normalized_filters = normalize_filters(config.get("filters", []))
 
     if not output_dir.is_absolute():
         output_dir = CONFIG_FILE.parent / output_dir
@@ -343,10 +405,13 @@ def save_output(config: Dict[str, Any], data: Dict[str, Any]) -> None:
     output_path = Path(output_file)
     if output_path.is_absolute():
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        dynamic_name = build_filter_filename(normalized_filters, output_path.name)
+        output_path = output_path.parent / dynamic_name
     else:
-        output_path = output_dir / output_path
+        dynamic_name = build_filter_filename(normalized_filters, output_path.name)
+        output_path = output_dir / dynamic_name
 
-    with output_path.open("w", encoding="utf-8") as fp:
+    with output_path.open("w", encoding=output_encoding) as fp:
         json.dump(data, fp, ensure_ascii=False, indent=2)
 
 

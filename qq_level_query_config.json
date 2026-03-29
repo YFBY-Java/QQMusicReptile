@@ -1,0 +1,20 @@
+{
+  "说明": "QQ 等级查询配置。cookie 用于自动提取 uin、skey、p_skey；qq_numbers 为直接查询列表；qq_generator 用于批量生成 QQ 号。",
+  "cookie": "",
+
+
+  "qq_numbers_说明": "直接填写要查询的 QQ 号列表。会和 qq_generator 生成结果合并并自动去重。",
+  "qq_numbers": [
+    ""
+  ],
+  "qq_generator": {
+    "说明": "批量生成规则：prefix + 中间枚举位 + suffix。fill_width=3 时，中间位会按 000、001、002 ... 999 这种方式生成。start/end/step 表示这个中间枚举值的范围和步长。",
+    "enabled": false,
+    "prefix": "12",
+    "suffix": "88",
+    "fill_width": 3,
+    "start": 0,
+    "end": 999,
+    "step": 1
+  }
+}
