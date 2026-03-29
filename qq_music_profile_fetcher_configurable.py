@@ -190,6 +190,26 @@ def get_nested_value(data: Dict[str, Any], field: str) -> Any:
     return current
 
 
+def normalize_filters(filters_config: Any) -> List[Dict[str, Any]]:
+    if isinstance(filters_config, list):
+        return [item for item in filters_config if isinstance(item, dict)]
+
+    if not isinstance(filters_config, dict):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for field, filter_item in filters_config.items():
+        if not isinstance(filter_item, dict):
+            continue
+        if not filter_item.get("enabled", False):
+            continue
+
+        merged_item = dict(filter_item)
+        merged_item.setdefault("field", field)
+        normalized.append(merged_item)
+    return normalized
+
+
 def is_match_filter(profile: Dict[str, Any], filters: List[Dict[str, Any]]) -> bool:
     for filter_item in filters:
         field = str(filter_item.get("field", "")).strip()
@@ -260,7 +280,7 @@ def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("没有可处理的 QQ 号，请检查 qq_numbers 或 qq_generator 配置")
 
     output_config = config.get("output", {})
-    filters = config.get("filters", [])
+    filters = normalize_filters(config.get("filters", []))
     include_raw = bool(output_config.get("include_raw_profile_data", False))
     selected_fields = output_config.get("fields", [])
     max_count = int(config.get("request", {}).get("max_count", 0))
@@ -313,9 +333,18 @@ def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def save_output(config: Dict[str, Any], data: Dict[str, Any]) -> None:
     output_config = config.get("output", {})
-    output_path = Path(output_config.get("file", "qq_music_profile_results.json"))
-    if not output_path.is_absolute():
-        output_path = CONFIG_FILE.parent / output_path
+    output_dir = Path(output_config.get("directory", "output"))
+    output_file = str(output_config.get("file", "qq_music_profile_results.json")).strip() or "qq_music_profile_results.json"
+
+    if not output_dir.is_absolute():
+        output_dir = CONFIG_FILE.parent / output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = Path(output_file)
+    if output_path.is_absolute():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output_path = output_dir / output_path
 
     with output_path.open("w", encoding="utf-8") as fp:
         json.dump(data, fp, ensure_ascii=False, indent=2)

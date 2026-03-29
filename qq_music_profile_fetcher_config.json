@@ -1,14 +1,17 @@
 {
+  "配置说明": "这是配置说明专用字段，不参与程序逻辑。可直接阅读中文说明后再修改下面各项配置。",
   "cookies": {
+    "说明": "Cookie 配置。items 可放多个 Cookie 轮换使用；multiline 可按一行一个 Cookie 填写。",
     "multiline": "",
     "items": [
-      "uin=o000000001; qm_keyst=your_cookie_1;",
-      "uin=o000000002; qm_keyst=your_cookie_2;"
+      ""
     ]
   },
-  "qq_numbers": [],
+  "qq_numbers_说明": "直接指定要抓取的 QQ 号列表。会和 qq_generator 生成结果合并并自动去重。",
+  "qq_numbers": [10086],
   "qq_generator": {
-    "enabled": true,
+    "说明": "批量生成 QQ 号配置。生成规则：prefix + 中间数字按 pad_width 补零 + suffix。",
+    "enabled": false,
     "prefix": "12",
     "suffix": "88",
     "pad_width": 4,
@@ -17,20 +20,41 @@
     "step": 1
   },
   "request": {
+    "说明": "请求控制。retries 表示单个 QQ 失败后的重试次数；max_count 为本次最多处理数量，0 表示不限制。",
     "retries": 2,
     "max_count": 0
   },
   "sleep": {
+    "说明": "请求间隔配置。实际等待时间为 seconds 加上 0 到 jitter_seconds 的随机抖动。",
     "seconds": 1.5,
     "jitter_seconds": 0.5
   },
-  "filters": [
-    {
-      "field": "ip_location",
-      "contains": "江苏"
+  "filters_说明": "字段筛选配置。每个字段都是独立开关；enabled=true 时才参与筛选。支持 equals、contains、not_contains、regex、in。",
+  "filters": {
+    "ip_location": {
+      "说明": "IP 属地筛选。示例：contains=广东，表示只保留属地中包含“广东”的结果。",
+      "enabled": true,
+      "contains": ""
+    },
+    "gender": {
+      "说明": "性别筛选。示例：equals=男，表示只保留性别为男的结果。",
+      "enabled": false,
+      "equals": "男"
+    },
+    "constellation": {
+      "说明": "星座筛选。示例：equals=双子座，表示只保留双子座。",
+      "enabled": false,
+      "equals": "双子座"
+    },
+    "fans_num": {
+      "说明": "粉丝数筛选。示例：in=[\"100\",\"1000\"]，表示只保留粉丝数刚好等于列表中某个值的结果。",
+      "enabled": false,
+      "in": ["100", "1000"]
     }
-  ],
+  },
   "output": {
+    "说明": "输出配置。directory 为输出目录，不存在会自动创建；file 为输出文件名；fields 控制最终输出哪些字段；include_raw_profile_data 控制是否保留原始资料。",
+    "directory": "output",
     "file": "qq_music_profile_results.json",
     "fields": [
       "qq_number",
