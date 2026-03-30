@@ -8,10 +8,10 @@ from typing import Any, Dict, Iterable, List, Optional
 import requests
 
 from qq_level_query import (
-    API_URL as QQ_LEVEL_API_URL,
     CONFIG_FILE as QQ_LEVEL_CONFIG_FILE,
-    extract_auth_params,
+    iter_cookies as iter_qq_level_cookies,
     load_config as load_qq_level_config,
+    query_qq_level_with_retries,
 )
 
 
@@ -23,10 +23,13 @@ VIP_LEVEL_PATTERN = re.compile(r"(?:^|[\\/_-])(?:s?vip)(\d+)(?:\D|$)", re.IGNORE
 
 class CookieRotator:
     def __init__(self, cookies: List[str]):
+        """缓存可用 Cookie，并提供顺序轮询能力。"""
+        # 预先过滤空值，避免运行时每次都判断。
         self.cookies = [item.strip() for item in cookies if item and item.strip()]
         self.index = 0
 
     def next(self) -> str:
+        """返回当前 Cookie，并把指针移动到下一个位置。"""
         if not self.cookies:
             return ""
         cookie = self.cookies[self.index]
@@ -36,6 +39,7 @@ class CookieRotator:
 
 class QQMusicProfileClient:
     def __init__(self):
+        """初始化 QQ 音乐资料抓取会话和默认请求头。"""
         self.session = requests.Session()
         self.api_headers = {
             "accept": "application/json",
@@ -66,13 +70,16 @@ class QQMusicProfileClient:
 
     @staticmethod
     def parse_json_response(resp: requests.Response) -> Dict[str, Any]:
+        """优先按 UTF-8 解析响应 JSON，失败后回退到 requests 自带解析。"""
         try:
             return json.loads(resp.content.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return resp.json()
 
     def get_created_diss_data(self, qq_number: str) -> Dict[str, Any]:
+        """查询用户歌单列表，并提取后续主页请求需要的 encrypt_uin。"""
         url = "https://c6.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss"
+        # 这条接口的关键输入是 hostuin，目标 QQ 号从这里进入查询链路。
         params = {
             "r": "",
             "_": str(int(time.time() * 1000)),
@@ -99,6 +106,7 @@ class QQMusicProfileClient:
         if data.get("code") != 0:
             raise RuntimeError(f"获取用户歌单信息失败：{data}")
 
+        # encrypt_uin 是后续访问 QQ 音乐主页分享页的关键标识。
         created_diss_data = data.get("data", {})
         encrypt_uin = created_diss_data.get("encrypt_uin")
         if not encrypt_uin:
@@ -106,6 +114,7 @@ class QQMusicProfileClient:
         return created_diss_data
 
     def get_profile_html(self, encrypt_uin: str, cookie: str) -> str:
+        """使用 encrypt_uin 和 Cookie 请求 QQ 音乐分享主页 HTML。"""
         url = "https://i2.y.qq.com/n3/other/pages/share/profile_v2/index.html"
         params = {
             "userid": encrypt_uin,
@@ -115,6 +124,7 @@ class QQMusicProfileClient:
 
         headers = dict(self.page_headers)
         if cookie:
+            # 按你的实际使用方式，主页请求必须带 Cookie。
             headers["Cookie"] = cookie
 
         resp = self.session.get(url, headers=headers, params=params, timeout=15)
@@ -123,6 +133,7 @@ class QQMusicProfileClient:
 
     @staticmethod
     def extract_qq_music_vip_level(info_root: Dict[str, Any]) -> Optional[int]:
+        """从 SSR 的图标信息中解析 QQ 音乐 VIP 等级。"""
         candidates: List[str] = []
 
         new_icon_info = info_root.get("NewIconInfo", {})
@@ -142,6 +153,7 @@ class QQMusicProfileClient:
                 if value:
                     candidates.append(value)
 
+        # 老页面和新页面的 VIP 图标入口不完全一致，所以两个入口都扫一遍。
         for item in info_root.get("Icons", []) or []:
             if not isinstance(item, dict):
                 continue
@@ -159,7 +171,9 @@ class QQMusicProfileClient:
 
     @staticmethod
     def find_nested_dict_by_key(data: Any, target_key: str) -> Dict[str, Any]:
+        """递归查找指定键对应的首个字典值，用于兼容页面结构漂移。"""
         if isinstance(data, dict):
+            # 先检查当前层，再向下递归，尽量优先拿到距离根更近的目标结构。
             value = data.get(target_key)
             if isinstance(value, dict):
                 return value
@@ -176,6 +190,7 @@ class QQMusicProfileClient:
 
     @staticmethod
     def extract_ip_location_from_html(html_text: str) -> Optional[str]:
+        """当 SSR 取不到 IP 时，直接从 HTML 文本中兜底提取属地。"""
         patterns = [
             r'"IP":\{"Location":"([^"]*)"\}',
             r'personal__info_txt[^>]*>\s*[^<]*?\|\s*[^<]*?\|\s*([^<|]+?)\s*</',
@@ -183,6 +198,7 @@ class QQMusicProfileClient:
             r'"Location":"([^"]*)"',
         ]
         for pattern in patterns:
+            # 先匹配结构化 JSON，再匹配页面可见文本，最后退化到宽泛 Location 搜索。
             match = re.search(pattern, html_text)
             if match:
                 value = match.group(1).strip()
@@ -196,6 +212,8 @@ class QQMusicProfileClient:
 
     @staticmethod
     def extract_vip_level_from_html(html_text: str) -> Optional[int]:
+        """当 SSR 取不到 VIP 时，直接从 HTML 中的图标地址兜底提取等级。"""
+        # 页面里常见的是 vip6/svip6 这种图片名，直接从全量 HTML 提取最大等级。
         levels = [int(item) for item in re.findall(r'(?:^|[\\/_-])(?:s?vip)(\d+)(?:\D|$)', html_text, re.IGNORECASE)]
 
         vip_img_match = re.search(
@@ -204,12 +222,15 @@ class QQMusicProfileClient:
             re.IGNORECASE,
         )
         if vip_img_match:
+            # 如果页面显式渲染了 VIP 图标，把它也加入候选，和全量搜索结果取最大值。
             levels.append(int(vip_img_match.group(1)))
 
         return max(levels) if levels else None
 
     @staticmethod
     def extract_ssr_data(html_text: str) -> Dict[str, Any]:
+        """从分享页 HTML 中抽取并反序列化首屏 SSR 数据。"""
+        # QQ 音乐分享页把首屏数据放在一个转义后的 JSON 字符串里，需要先反转义再反序列化。
         pattern = r'window\.__ssrFirstPageData__\s*=\s*"((?:\\.|[^"\\])*)"'
         match = re.search(pattern, html_text, re.S)
         if not match:
@@ -220,11 +241,13 @@ class QQMusicProfileClient:
         return json.loads(json_str)
 
     def get_profile_info(self, qq_number: str, cookie: str) -> Dict[str, Any]:
+        """整合歌单接口和主页接口，返回单个 QQ 的完整音乐资料。"""
         created_diss_data = self.get_created_diss_data(qq_number)
         encrypt_uin = created_diss_data.get("encrypt_uin")
         html_text = self.get_profile_html(encrypt_uin, cookie)
         ssr_data = self.extract_ssr_data(html_text)
 
+        # 正常情况直接走首选路径；如果页面结构调整，再退化到递归查找 Info。
         info_root = ssr_data.get("homeData", {}).get("data", {}).get("Info", {})
         if not info_root:
             info_root = self.find_nested_dict_by_key(ssr_data, "Info")
@@ -232,10 +255,13 @@ class QQMusicProfileClient:
         playlists = created_diss_data.get("disslist", [])
         vip_level = self.extract_qq_music_vip_level(info_root)
         if vip_level is None:
+            # SSR 结构取不到时，再从页面里直接扫 vip 图标地址。
             vip_level = self.extract_vip_level_from_html(html_text)
         ip_location = info_root.get("IP", {}).get("Location")
         if not ip_location:
+            # 带 Cookie 返回的页面可能被裁剪，这里退回到页面可见文本兜底。
             ip_location = self.extract_ip_location_from_html(html_text)
+        # 昵称优先取主页名字；如果主页字段为空，再退到歌单接口的 hostname。
         qq_music_nickname = base_info.get("Name") or created_diss_data.get("hostname")
 
         return {
@@ -262,52 +288,50 @@ class QQMusicProfileClient:
 
 
 class QQLevelClient:
-    def __init__(self, cookie: str):
-        self.cookie = str(cookie).strip()
+    def __init__(self, config: Dict[str, Any]):
+        """初始化 QQ 等级查询客户端，并复用等级模块的 Cookie 轮询策略。"""
+        # 主脚本直接复用 QQ 等级模块的 Cookie 轮询规则，避免两套配置行为不一致。
+        self.cookie_rotator = iter_qq_level_cookies(config)
+        self.retries = max(1, int(config.get("request", {}).get("retries", 1)))
         try:
-            self.auth_params = extract_auth_params(self.cookie) if self.cookie else {}
+            self.enabled_value = bool(self.cookie_rotator.cookies)
         except Exception:
-            self.auth_params = {}
+            self.enabled_value = False
 
     @property
     def enabled(self) -> bool:
-        return bool(self.auth_params)
+        """标记当前是否具备可用的 QQ 等级查询 Cookie。"""
+        return self.enabled_value
 
     def query(self, qq_number: str) -> Dict[str, Any]:
+        """查询单个 QQ 的等级资料；失败时返回空字典而不是中断主流程。"""
         if not self.enabled:
             return {}
         try:
-            response = requests.get(
-                QQ_LEVEL_API_URL,
-                params={**self.auth_params, "qq": str(qq_number).strip()},
-                timeout=15,
-            )
-            response.raise_for_status()
-
-            try:
-                return json.loads(response.content.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                return {"raw_text": response.text}
+            # 主流程里 QQ 等级只是附加信息，不应该因为它失败就影响 QQ 音乐资料输出。
+            return query_qq_level_with_retries(qq_number, self.cookie_rotator, self.retries)
         except Exception:
             return {}
 
 
-def load_optional_qq_level_cookie() -> str:
+def load_optional_qq_level_config() -> Dict[str, Any]:
+    """尝试读取 QQ 等级配置；不存在或解析失败时返回空配置。"""
     if not QQ_LEVEL_CONFIG_FILE.exists():
-        return ""
+        return {}
 
     try:
-        config = load_qq_level_config(QQ_LEVEL_CONFIG_FILE)
+        return load_qq_level_config(QQ_LEVEL_CONFIG_FILE)
     except Exception:
-        return ""
-    return str(config.get("cookie", "")).strip()
+        return {}
 
 
 def find_first_value(data: Any, candidate_keys: List[str]) -> Any:
+    """递归查找候选键中的首个非空值。"""
     normalized_keys = {key.lower() for key in candidate_keys}
 
     def _search(value: Any) -> Any:
         if isinstance(value, dict):
+            # 先命中当前层键名，再递归子层，优先使用离根更近的语义字段。
             for key, item in value.items():
                 if str(key).lower() in normalized_keys and item not in (None, ""):
                     return item
@@ -326,6 +350,7 @@ def find_first_value(data: Any, candidate_keys: List[str]) -> Any:
 
 
 def normalize_qq_level_profile(level_data: Dict[str, Any]) -> Dict[str, Any]:
+    """把 QQ 等级接口的不稳定字段名归一成主脚本使用的固定字段。"""
     qq_nickname = find_first_value(
         level_data,
         [
@@ -352,6 +377,7 @@ def normalize_qq_level_profile(level_data: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     return {
+        # QQ 等级接口字段不稳定，这里统一归一到主结果需要的字段名。
         "qq_nickname": qq_nickname,
         "qq_level": qq_level,
         "qq_level_raw": level_data,
@@ -364,6 +390,8 @@ def save_debug_profile_payload(
     ssr_data: Dict[str, Any],
     output_dir: Path,
 ) -> None:
+    """当音乐字段缺失时，把真实页面和 SSR 数据落盘用于排查。"""
+    # 音乐字段缺失时，把真实响应落盘，后续可以直接对照页面结构修提取逻辑。
     debug_dir = output_dir / "debug_missing_music_fields"
     debug_dir.mkdir(parents=True, exist_ok=True)
 
@@ -375,17 +403,20 @@ def save_debug_profile_payload(
 
 
 def load_config(config_path: Path) -> Dict[str, Any]:
+    """读取 JSON 配置文件。"""
     with config_path.open("r", encoding="utf-8") as fp:
         return json.load(fp)
 
 
 def build_qq_numbers(config: Dict[str, Any]) -> List[str]:
+    """根据显式列表和生成器配置构造最终待抓取 QQ 列表。"""
     explicit_numbers = [str(item).strip() for item in config.get("qq_numbers", []) if str(item).strip()]
     generator = config.get("qq_generator", {})
 
     if not generator.get("enabled"):
         return deduplicate(explicit_numbers)
 
+    # 生成规则固定为 prefix + 中间补零序号 + suffix。
     prefix = str(generator.get("prefix", ""))
     suffix = str(generator.get("suffix", ""))
     fill_width = int(generator.get("fill_width", generator.get("pad_width", 0)))
@@ -411,6 +442,7 @@ def build_qq_numbers(config: Dict[str, Any]) -> List[str]:
 
 
 def deduplicate(values: Iterable[str]) -> List[str]:
+    """按原始顺序去重。"""
     result = []
     seen = set()
     for value in values:
@@ -422,6 +454,7 @@ def deduplicate(values: Iterable[str]) -> List[str]:
 
 
 def get_nested_value(data: Dict[str, Any], field: str) -> Any:
+    """按 a.b.c 形式的路径从字典中取值。"""
     current: Any = data
     for part in field.split("."):
         if not isinstance(current, dict):
@@ -431,6 +464,7 @@ def get_nested_value(data: Dict[str, Any], field: str) -> Any:
 
 
 def normalize_filters(filters_config: Any) -> List[Dict[str, Any]]:
+    """把字典或数组形式的筛选配置统一归一成列表结构。"""
     if isinstance(filters_config, list):
         return [item for item in filters_config if isinstance(item, dict)]
 
@@ -444,6 +478,7 @@ def normalize_filters(filters_config: Any) -> List[Dict[str, Any]]:
         if not filter_item.get("enabled", False):
             continue
 
+        # 字典写法里字段名来自外层 key，这里补到统一结构里，后续处理就不用区分来源。
         merged_item = dict(filter_item)
         merged_item.setdefault("field", field)
         normalized.append(merged_item)
@@ -451,6 +486,7 @@ def normalize_filters(filters_config: Any) -> List[Dict[str, Any]]:
 
 
 def slugify_filename_part(value: Any) -> str:
+    """把任意值清洗成适合拼接到文件名里的安全片段。"""
     text = "" if value is None else str(value).strip()
     if not text:
         return "empty"
@@ -462,6 +498,7 @@ def slugify_filename_part(value: Any) -> str:
 
 
 def build_filter_filename(filters: List[Dict[str, Any]], fallback_name: str) -> str:
+    """根据当前筛选条件动态生成输出文件名。"""
     if not filters:
         return fallback_name
 
@@ -473,6 +510,7 @@ def build_filter_filename(filters: List[Dict[str, Any]], fallback_name: str) -> 
         operator = ""
         raw_value: Any = None
 
+        # 只取当前筛选项里第一个生效的操作符，用来生成稳定文件名。
         for candidate in supported_operators:
             if candidate in filter_item and filter_item.get(candidate) is not None:
                 operator = candidate
@@ -493,6 +531,7 @@ def build_filter_filename(filters: List[Dict[str, Any]], fallback_name: str) -> 
 
 
 def is_match_filter(profile: Dict[str, Any], filters: List[Dict[str, Any]]) -> bool:
+    """判断单个资料是否满足全部筛选条件。"""
     for filter_item in filters:
         field = str(filter_item.get("field", "")).strip()
         if not field:
@@ -527,6 +566,7 @@ def is_match_filter(profile: Dict[str, Any], filters: List[Dict[str, Any]]) -> b
 
 
 def select_output_fields(profile: Dict[str, Any], fields: List[str]) -> Dict[str, Any]:
+    """按配置挑选最终输出字段；为空时返回完整资料。"""
     if not fields:
         return profile
 
@@ -537,10 +577,12 @@ def select_output_fields(profile: Dict[str, Any], fields: List[str]) -> Dict[str
 
 
 def sleep_with_jitter(sleep_config: Dict[str, Any]) -> None:
+    """按照基础间隔加随机抖动进行休眠，降低连续请求节奏。"""
     base_seconds = float(sleep_config.get("seconds", 0))
     jitter_seconds = float(sleep_config.get("jitter_seconds", 0))
     delay = base_seconds
     if jitter_seconds > 0:
+        # 抖动用于让请求间隔不要完全固定，减少规律性。
         delay += random.uniform(0, jitter_seconds)
 
     if delay > 0:
@@ -548,7 +590,9 @@ def sleep_with_jitter(sleep_config: Dict[str, Any]) -> None:
 
 
 def iter_cookies(config: Dict[str, Any]) -> CookieRotator:
+    """从主配置中加载 QQ 音乐 Cookie 列表，并构造成轮询器。"""
     cookie_config = config.get("cookies", {})
+    # 同时兼容数组写法和多行文本写法，便于直接粘贴浏览器里的 Cookie。
     items = list(cookie_config.get("items", []))
     multiline = str(cookie_config.get("multiline", ""))
     if multiline.strip():
@@ -557,6 +601,7 @@ def iter_cookies(config: Dict[str, Any]) -> CookieRotator:
 
 
 def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
+    """主处理流程：批量抓取、补充 QQ 等级、筛选并汇总结果。"""
     qq_numbers = build_qq_numbers(config)
     if not qq_numbers:
         raise ValueError("没有可处理的 QQ 号，请检查 qq_numbers 或 qq_generator 配置")
@@ -572,7 +617,7 @@ def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
     request_retries = int(config.get("request", {}).get("retries", 1))
 
     client = QQMusicProfileClient()
-    qq_level_client = QQLevelClient(load_optional_qq_level_cookie())
+    qq_level_client = QQLevelClient(load_optional_qq_level_config())
     cookie_rotator = iter_cookies(config)
 
     matches: List[Dict[str, Any]] = []
@@ -585,10 +630,12 @@ def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
         last_error: Optional[str] = None
         success = False
         for attempt in range(1, request_retries + 1):
+            # QQ 音乐主链路也按次轮询 Cookie，失败时自动换 Cookie 继续。
             cookie = cookie_rotator.next()
             try:
                 profile = client.get_profile_info(qq_number, cookie)
                 profile.update(normalize_qq_level_profile(qq_level_client.query(qq_number)))
+                # 最终输出字段统一收敛到业务侧约定的名字。
                 profile["ip_address"] = profile.get("ip_location")
                 profile["used_cookie"] = cookie
                 profile["request_attempt"] = attempt
@@ -603,14 +650,17 @@ def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
                 success = True
 
                 if not include_raw:
+                    # 默认输出精简结果；调试时可以通过配置保留原始响应。
                     profile.pop("raw_profile_data", None)
                     profile.pop("raw_profile_html", None)
                     profile.pop("qq_level_raw", None)
 
                 if is_match_filter(profile, filters):
+                    # fields 留空时输出完整结构；否则只输出配置里声明的字段。
                     matches.append(select_output_fields(profile, selected_fields))
                 break
             except Exception as exc:
+                # 只记录最后一次错误，避免失败列表里塞进重复噪音。
                 last_error = str(exc)
 
         if not success and last_error:
@@ -630,6 +680,7 @@ def process_profiles(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def save_output(config: Dict[str, Any], data: Dict[str, Any]) -> None:
+    """把结果按配置写入目标目录和文件。"""
     output_config = config.get("output", {})
     output_dir = Path(output_config.get("directory", "output"))
     output_file = str(output_config.get("file", "qq_music_profile_results.json")).strip() or "qq_music_profile_results.json"
@@ -646,14 +697,17 @@ def save_output(config: Dict[str, Any], data: Dict[str, Any]) -> None:
         dynamic_name = build_filter_filename(normalized_filters, output_path.name)
         output_path = output_path.parent / dynamic_name
     else:
+        # 相对路径统一落到 output.directory 下，并根据筛选条件动态追加文件名后缀。
         dynamic_name = build_filter_filename(normalized_filters, output_path.name)
         output_path = output_dir / dynamic_name
 
     with output_path.open("w", encoding=output_encoding) as fp:
+        # 使用缩进 JSON 便于直接人工阅读和继续排查。
         json.dump(data, fp, ensure_ascii=False, indent=2)
 
 
 def main() -> None:
+    """主脚本入口：读取配置、执行抓取并保存结果。"""
     config = load_config(CONFIG_FILE)
     result = process_profiles(config)
     save_output(config, result)

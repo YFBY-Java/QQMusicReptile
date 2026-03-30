@@ -1,11 +1,22 @@
 {
-  "说明": "QQ 等级查询配置。cookie 用于自动提取 uin、skey、p_skey；qq_numbers 为直接查询列表；qq_generator 用于批量生成 QQ 号。",
-  "cookie": "",
+  "说明": "QQ 等级查询配置。cookies 支持多个 Cookie 轮询；单个 QQ 查询失败时会自动切换下一个 Cookie 重试。",
+  "cookies": {
+    "说明": "Cookie 配置。items 可放多个 Cookie 轮换使用；multiline 可按一行一个 Cookie 填写。每个 Cookie 需要至少包含 uin/p_uin、skey、p_skey。",
+    "multiline": "",
+    "items": [
+      ""
+    ]
+  },
 
   "qq_numbers_说明": "直接填写要查询的 QQ 号列表。会和 qq_generator 生成结果合并并自动去重。",
   "qq_numbers": [
     "10086"
   ],
+  "request": {
+    "说明": "请求控制。retries 表示单个 QQ 失败后最多重试多少次；每次重试都会切换到下一个 Cookie。max_count 为本次最多处理数量，0 表示不限制。",
+    "retries": 2,
+    "max_count": 0
+  },
   "qq_generator": {
     "说明": "批量生成规则：prefix + 中间枚举位 + suffix。fill_width=3 时，中间位会按 000、001、002 ... 999 这种方式生成。start/end/step 表示这个中间枚举值的范围和步长。",
     "enabled": false,

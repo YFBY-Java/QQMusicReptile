@@ -1,17 +1,20 @@
 # QQMusicReptile
 
 - `src/qq_music_profile_fetcher.py`：原始脚本，不做修改。
-- `src/qq_music_profile_fetcher_configurable.py`：支持配置化批量抓取、字段筛选、结果输出。
-- `config/qq_music_profile_fetcher_config.json`：统一配置文件。
+- `src/qq_music_profile_fetcher_configurable.py`：QQ 音乐主页抓取主脚本，支持批量查询、筛选、输出简化结果，并可联动 QQ 等级查询。
+- `src/qq_level_query.py`：独立 QQ 等级查询脚本。
+- `config/qq_music_profile_fetcher_config.json`：QQ 音乐主页抓取配置。
+- `config/qq_level_query_config.json`：QQ 等级查询配置。
 
 ## 功能
 
-- Cookie 从配置文件读取，可配置多个 Cookie 轮换。
+- QQ 音乐主页支持多 Cookie 轮询。
+- QQ 等级查询支持多 Cookie 轮询，失败后自动切换下一个 Cookie 重试。
 - 支持直接指定 QQ 号，或按规则批量生成 QQ 号。
 - 支持按字段筛选结果，每个字段都有独立开关。
 - 结果输出到指定目录，不存在会自动创建。
 
-## 配置说明
+## QQ 音乐主页抓取
 
 配置文件：`config/qq_music_profile_fetcher_config.json`
 
@@ -29,6 +32,7 @@
 
 - `items`：Cookie 列表。
 - `multiline`：多行字符串写法，每行一个 Cookie。
+- 主脚本会按顺序轮询 Cookie；单个 QQ 失败时会切到下一个 Cookie 继续重试。
 
 ### 2. QQ 号直接配置
 
@@ -164,17 +168,14 @@
 ```json
 "output": {
   "directory": "output",
-  "file": "qq_music_profile_results.json",
+  "file": "qq_music_results.json",
   "fields": [
     "qq_number",
-    "name",
-    "ip_location",
-    "fans_num",
-    "visitor_num",
-    "gender",
+    "qq_level",
+    "qq_nickname",
+    "qq_music_nickname",
+    "ip_address",
     "qq_music_vip_level",
-    "used_cookie",
-    "request_attempt"
   ],
   "include_raw_profile_data": false
 }
@@ -191,18 +192,73 @@
 python src/qq_music_profile_fetcher_configurable.py
 ```
 
-运行后会：
-
-- 在控制台打印结果。
-- 同时写入 `output.directory/output.file` 指定的文件。
-
 ## 输出结构
 
 - `summary`：统计信息。
 - `matches`：筛选后的命中结果。
 - `failures`：失败的 QQ 和错误信息。
+- 默认 `matches` 中每条记录只保留以下字段：
+  - `qq_number`
+  - `qq_level`
+  - `qq_nickname`
+  - `qq_music_nickname`
+  - `ip_address`
+  - `qq_music_vip_level`
+
+如果某个 QQ 的 `ip_address` 或 `qq_music_vip_level` 缺失，脚本会自动把当次真实返回的 QQ 音乐主页 HTML 和 SSR JSON 落到：
+
+`output/debug_missing_music_fields/`
+
+用于继续排查。
+
+## QQ 等级查询
+
+配置文件：`config/qq_level_query_config.json`
+
+### 1. Cookie 配置
+
+```json
+"cookies": {
+  "multiline": "",
+  "items": [
+    "uin=o000000001; skey=xxx; p_skey=xxx;",
+    "uin=o000000002; skey=xxx; p_skey=xxx;"
+  ]
+}
+```
+
+- 每个 Cookie 至少需要包含 `uin/p_uin`、`skey`、`p_skey`。
+- 查询时会按顺序轮询 Cookie。
+- 如果本次请求失败，脚本会自动切到下一个 Cookie 重试。
+
+### 2. 请求控制
+
+```json
+"request": {
+  "retries": 2,
+  "max_count": 0
+}
+```
+
+- `retries`：单个 QQ 最多重试次数。
+- `max_count`：本次最多处理数量，`0` 表示不限制。
+
+### 3. 运行
+
+```bash
+python src/qq_level_query.py
+```
+
+输出结构：
+
+- `summary.requested`：请求数量。
+- `summary.succeeded`：成功数量。
+- `summary.failed`：失败数量。
+- `results`：成功结果。
+- `failures`：失败记录。
 
 ## 建议
 
 - 想降低风控：增加 Cookie、适当加大休眠、控制 `max_count` 分批执行。
 - 想输出完整资料：把 `include_raw_profile_data` 设为 `true`，并把 `fields` 设为空数组。
+- 如果 QQ 音乐字段缺失，优先看 `output/debug_missing_music_fields/` 里的真实返回页面，再决定怎么改提取逻辑。
