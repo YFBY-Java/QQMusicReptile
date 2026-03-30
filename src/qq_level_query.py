@@ -6,7 +6,8 @@ import requests
 
 
 API_URL = "https://api.icofun.cn/api/qq_level.php"
-CONFIG_FILE = Path(__file__).with_name("qq_level_query_config.json")
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+CONFIG_FILE = CONFIG_DIR / "qq_level_query_config.json"
 
 
 def load_config(config_path: Path) -> Dict[str, Any]:

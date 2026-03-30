@@ -8,7 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 import requests
 
 
-CONFIG_FILE = Path(__file__).with_name("qq_music_profile_fetcher_config.json")
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+CONFIG_FILE = CONFIG_DIR / "qq_music_profile_fetcher_config.json"
 
 
 class CookieRotator:

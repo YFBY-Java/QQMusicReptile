@@ -1,8 +1,8 @@
 # QQMusicReptile
 
-- `qq_music_profile_fetcher.py`：原始脚本，不做修改。
-- `qq_music_profile_fetcher_configurable.py`：支持配置化批量抓取、字段筛选、结果输出。
-- `qq_music_profile_fetcher_config.json`：统一配置文件。
+- `src/qq_music_profile_fetcher.py`：原始脚本，不做修改。
+- `src/qq_music_profile_fetcher_configurable.py`：支持配置化批量抓取、字段筛选、结果输出。
+- `config/qq_music_profile_fetcher_config.json`：统一配置文件。
 
 ## 功能
 
@@ -13,7 +13,7 @@
 
 ## 配置说明
 
-配置文件：`qq_music_profile_fetcher_config.json`
+配置文件：`config/qq_music_profile_fetcher_config.json`
 
 ### 1. Cookie 配置
 
@@ -186,7 +186,7 @@
 ## 运行
 
 ```bash
-python qq_music_profile_fetcher_configurable.py
+python src/qq_music_profile_fetcher_configurable.py
 ```
 
 运行后会：
