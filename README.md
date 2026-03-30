@@ -120,6 +120,7 @@
 - `gender`
 - `constellation`
 - `encrypt_uin`
+- `qq_music_vip_level`
 
 示例：
 
@@ -171,6 +172,7 @@
     "fans_num",
     "visitor_num",
     "gender",
+    "qq_music_vip_level",
     "used_cookie",
     "request_attempt"
   ],

@@ -59,16 +59,11 @@
     "encoding": "utf-8",
     "fields": [
       "qq_number",
-      "name",
-      "ip_location",
-      "fans_num",
-      "visitor_num",
-      "gender",
-      "playlist_hostname",
-      "playlist_total",
-      "playlists",
-      "used_cookie",
-      "request_attempt"
+      "qq_level",
+      "qq_nickname",
+      "qq_music_nickname",
+      "ip_address",
+      "qq_music_vip_level"
     ],
     "include_raw_profile_data": false
   }
