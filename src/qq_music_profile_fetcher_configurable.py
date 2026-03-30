@@ -8,7 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 import requests
 
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_FILE = CONFIG_DIR / "qq_music_profile_fetcher_config.json"
 
 
@@ -400,7 +401,7 @@ def save_output(config: Dict[str, Any], data: Dict[str, Any]) -> None:
     normalized_filters = normalize_filters(config.get("filters", []))
 
     if not output_dir.is_absolute():
-        output_dir = CONFIG_FILE.parent / output_dir
+        output_dir = PROJECT_ROOT / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = Path(output_file)
